@@ -1,0 +1,71 @@
+trigger:
+- main
+
+variables:
+    BuildConfiguration: Release
+    DotNetVersion: 8.0.100-rc.2.23502.2
+
+stages:
+- stage: Build
+  jobs:
+  - job: BuildMAUILIB
+    displayName: Build Lib
+    pool:
+      vmImage: 'macOS-13'
+      demands:
+      - MSBuild
+
+    steps:
+
+    - task: Bash@3
+      displayName: Install .NET 8 Preview
+      inputs:
+        targetType: 'inline'
+        script: |
+          curl -o dotnet-install.sh -sSL https://dotnet.microsoft.com/download/dotnet/scripts/v1/dotnet-install.sh
+          sh dotnet-install.sh --version $(DotNetVersion)
+          dotnet --list-sdks
+
+
+    - task: Bash@3
+      displayName: Install MAUI
+      inputs:
+        targetType: 'inline'
+        script: |
+          dotnet nuget locals all --clear
+          dotnet workload install maui android ios
+
+    - task: Bash@3
+      displayName: Restore nuget
+      inputs:
+        targetType: 'inline'
+        script: |
+          dotnet restore <path_to_sln>
+        
+    # https://docs.microsoft.com/en-us/dotnet/maui/macos/deployment/overview
+    - task: Bash@3
+      displayName: Build and Pack Library
+      inputs:
+        targetType: 'inline'
+        script: |
+          dotnet pack <path_to_csproj> -c Release
+
+    - task: CopyFiles@2
+      displayName: Copy Nuget
+      inputs:
+        Contents: |
+          **/*.nupkg
+        TargetFolder: '$(Build.ArtifactStagingDirectory)'
+        
+    # - task: DotNetCoreCLI@2
+    #   inputs:
+    #     command: 'push'
+    #     packagesToPush: '$(Build.ArtifactStagingDirectory)/*.nupkg'
+    #     nuGetFeedType: 'internal'
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'drop_nuget'
+        publishLocation: 'Container'
+        

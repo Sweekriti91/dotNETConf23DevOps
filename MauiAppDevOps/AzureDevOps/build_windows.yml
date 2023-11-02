@@ -1,0 +1,102 @@
+trigger:
+- main
+
+variables:
+    BuildConfiguration: Release
+    DotNetVersion: 8.0.100-rc.2.23502.2
+
+stages:
+- stage: BuildApps
+  jobs:
+  - job: BuildMAUIApps
+    displayName: Build MAUI App
+    pool:
+      vmImage: 'windows-2022'
+      demands:
+      - MSBuild
+      
+    steps:
+    
+
+    - task: Bash@3
+      displayName: Install .NET 8
+      inputs:
+        targetType: 'inline'
+        script: |
+          curl -o dotnet-install.sh -sSL https://dotnet.microsoft.com/download/dotnet/scripts/v1/dotnet-install.sh
+          sh dotnet-install.sh --version $(DotNetVersion)
+          dotnet --list-sdks
+
+    - task: UseDotNet@2
+      displayName: .NET Version
+      inputs:
+        packageType: 'sdk'
+        version: '$(DotNetVersion)'
+    
+    - task: PowerShell@2
+      displayName: Install .NET MAUI
+      inputs:
+        targetType: 'inline'
+        script: |
+          & dotnet nuget locals all --clear
+          & dotnet workload install maui android
+
+    - task: Bash@3
+      displayName: Run Unit Test
+      inputs:
+        targetType: 'inline'
+        script: |
+          dotnet test <path_to_Test_Project> --logger trx --configuration Debug --collect:"XPlat Code Coverage"
+
+    - task: PublishTestResults@2
+      condition: succeededOrFailed()
+      inputs:
+        testResultsFormat: 'VSTest'
+        testResultsFiles: |
+          **/testResults.trx
+          **/*.trx
+
+     # Publish code coverage report to the pipeline
+    - task: PublishCodeCoverageResults@1
+      condition: succeededOrFailed()
+      displayName: 'Publish code coverage'
+      inputs:
+        codeCoverageTool: Cobertura
+        summaryFileLocation: $(System.DefaultWorkingDirectory)/**/*.cobertura.xml 
+
+  # https://docs.microsoft.com/en-us/dotnet/maui/android/deployment/overview
+    - task: Bash@3
+      displayName: Build Android App
+      inputs:
+        targetType: 'inline'
+        script: |
+          dotnet publish <path_to_project_file> -f net8.0-android -c Release
+
+    # Signing Android App : https://docs.microsoft.com/en-us/azure/devops/pipelines/apps/mobile/app-signing?view=azure-devops&tabs=apple-install-during-build#sign-your-android-app
+
+    - task: CopyFiles@2
+      inputs:
+        Contents: |
+          **/*.apk
+        TargetFolder: '$(Build.ArtifactStagingDirectory)'
+
+    
+  #   # https://docs.microsoft.com/en-us/dotnet/maui/windows/deployment/overview
+    - task: PowerShell@2
+      displayName: Build Windows MSIX
+      inputs:
+        targetType: 'inline'
+        script: |
+          dotnet publish <path_to_project_file> -f net8.0-windows10.0.19041.0 -c Release
+
+    - task: CopyFiles@2
+      inputs:
+        Contents: |
+          **/*.msix
+        TargetFolder: '$(Build.ArtifactStagingDirectory)'
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'drop_artifacts'
+        publishLocation: 'Container'

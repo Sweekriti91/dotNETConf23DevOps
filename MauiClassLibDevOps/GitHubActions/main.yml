@@ -1,0 +1,64 @@
+name: buildCI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+  workflow_dispatch:
+
+env:
+    DOTNETVERSION: 8.0.100-rc.2.23502.2
+
+jobs:
+  buildMauiLib:
+    runs-on: macos-13
+    
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Install .NET 8
+        shell: bash
+        run: |
+          curl -o dotnet-install.sh -sSL https://dotnet.microsoft.com/download/dotnet/scripts/v1/dotnet-install.sh
+          sh dotnet-install.sh --version ${{env.DOTNETVERSION}}
+          dotnet --list-sdks  
+
+      - name: List installed .NET info
+        shell: pwsh
+        run: dotnet --info
+
+      - name: Install .NET MAUI
+        shell: bash
+        run: |
+          dotnet workload install android ios maui
+    
+      - name: Restore nuget packages
+        run: |
+          dotnet restore <path_to_sln>
+
+      - name: Build and Pack Library
+        run: |
+          dotnet pack <path to csproj> -c Release
+
+      - uses: actions/upload-artifact@v2
+        with:
+          name: artifacts-nuget
+          path: |
+            **/*.nupkg
+            
+    # publish:
+    #   name: Publish
+    #   needs:
+    #     - build
+    #   runs-on: windows-latest
+    #   steps:
+    #     - name: Download Artifacts
+    #       uses: actions/download-artifact@v1
+    #       with:
+    #         name: nuget-artifact
+    #    
+    #     - name: Push nuget to Nuget.org
+    #       run: |
+    #         dotnet nuget push foo.nupkg -k <API_KEY>  -s https://api.nuget.org/v3/index.json --skip-duplicat

@@ -1,0 +1,75 @@
+name: windowsCI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+  workflow_dispatch:
+
+env:
+    DOTNETVERSION: 8.0.100-rc.2.23502.2
+    VSVERSION: 2022/Preview
+
+permissions:
+  checks: write
+  
+jobs:
+  buildMaui:
+    runs-on: windows-2022
+    
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Install .NET 8
+        shell: pwsh
+        run: |
+          curl -o dotnet-install.sh -sSL https://dotnet.microsoft.com/download/dotnet/scripts/v1/dotnet-install.ps1
+          sh dotnet-install.sh --version ${{env.DOTNETVERSION}}
+          dotnet --list-sdks 
+      
+      - name: Setup .NET SDK ${{env.DOTNETVERSION}}
+        uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: '${{env.DOTNETVERSION}}'
+          
+      - name: List installed .NET info
+        shell: pwsh
+        run: dotnet --info
+
+      - name: Install .NET MAUI
+        shell: pwsh
+        run: |
+          & dotnet nuget locals all --clear
+          & dotnet workload install maui android
+
+      - name: Run Unit Test
+        shell: bash
+        run: |
+          dotnet test <path_to_Test_Project> --logger trx --configuration Debug --collect:"XPlat Code Coverage"
+      
+      - name: Test Reporter
+        uses: dorny/test-reporter@v1.7.0
+        if: success() || failure()
+        with:
+          name: Unit Test Report
+          path: '**/*.trx'
+          reporter: dotnet-trx
+
+      # https://docs.microsoft.com/en-us/dotnet/maui/windows/deployment/overview
+      - name: Build Windows App
+        run: |
+          dotnet publish <path_to_csproj> -f net8.0-windows10.0.19041.0 -c Release 
+
+      - name : Build Android App
+        run: |
+          dotnet publish <path_to_csproj> -f net8.0-android -c Release
+            
+      - uses: actions/upload-artifact@v2
+        with:
+          name: artifacts-windows
+          path: |
+            **\*.msix
+            **\*.apk
+          

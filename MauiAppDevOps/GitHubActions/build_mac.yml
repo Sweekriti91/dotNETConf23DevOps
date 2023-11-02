@@ -1,0 +1,74 @@
+name: buildCI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+  workflow_dispatch:
+
+env:
+    DOTNETVERSION: 8.0.100-rc.2.23502.2
+    
+permissions:
+  checks: write
+
+jobs:
+  buildMauiApp:
+    runs-on: macos-13
+    
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Install .NET 8
+        shell: bash
+        run: |
+          curl -o dotnet-install.sh -sSL https://dotnet.microsoft.com/download/dotnet/scripts/v1/dotnet-install.sh
+          sh dotnet-install.sh --version ${{env.DOTNETVERSION}}
+          dotnet --list-sdks  
+
+      - name: List installed .NET info
+        shell: pwsh
+        run: dotnet --info
+
+      - name: Install .NET MAUI
+        shell: bash
+        run: |
+          dotnet workload install maui macos ios wasm-tools
+    
+      - name: Restore nuget packages
+        run: |
+          dotnet restore <path_to_sln>
+
+      - name: Run Unit Test
+        shell: bash
+        run: |
+          dotnet test <path_to_Test_Project> --logger "trx;LogFileName=test-results.trx" --configuration Debug --collect:"XPlat Code Coverage"
+
+      - name: Test Reporter
+        uses: dorny/test-reporter@v1.7.0
+        if: success() || failure()
+        with:
+          name: Unit Test Report
+          path: <path_to_Test_ResultsTrx_file>
+          reporter: dotnet-trx
+      
+
+      - name: Build MacCatalyst
+        shell: bash
+        run: |
+          dotnet publish <path_to_project_file> -f net8.0-maccatalyst -c Release -p:BuildIpa=True
+
+      - name: Build Android
+        shell: bash
+        run: |
+          dotnet publish <path_to_project_file> -f net8.0-android -c Release
+          
+      - uses: actions/upload-artifact@v2
+        with:
+          name: artifacts-binaries
+          path: |
+            **/*.pkg
+            **/*.apk
+      

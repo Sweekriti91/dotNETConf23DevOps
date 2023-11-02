@@ -1,0 +1,164 @@
+trigger:
+- main
+
+variables:
+    BuildConfiguration: Release
+    DotNetVersion: 8.0.100-rc.2.23502.2
+
+stages:
+- stage: BuildApps
+  jobs:
+  - job: BuildMAUIApps
+    displayName: Build Apps
+    pool:
+      vmImage: 'macOS-13'
+      demands:
+      - MSBuild
+
+    steps:
+
+   # https://docs.microsoft.com/en-us/azure/devops/pipelines/apps/mobile/app-signing?view=azure-devops&tabs=apple-install-during-build#sign-your-apple-ios-macos-tvos-or-watchos-app
+    # Setup Secret Pipeline Variable or Library Secrets Variable for iOS Certificate Password
+    # - task: InstallAppleCertificate@2
+    #   inputs:
+    #     certSecureFile: '<IOS_DEVELOPMENT_CERT_P12>'
+    #     certPwd: '$(iOSCertPassword)'
+    #     keychain: 'temp'
+
+    # - task: InstallAppleProvisioningProfile@1
+    #   inputs:
+    #     provisioningProfileLocation: 'secureFiles'
+    #     provProfileSecureFile: '<IOS_PROVISIONING_PROFILE>'
+
+
+    - task: Bash@3
+      displayName: Install .NET 8 Preview
+      inputs:
+        targetType: 'inline'
+        script: |
+          curl -o dotnet-install.sh -sSL https://dotnet.microsoft.com/download/dotnet/scripts/v1/dotnet-install.sh
+          sh dotnet-install.sh --version $(DotNetVersion)
+          dotnet --list-sdks
+
+
+    - task: Bash@3
+      displayName: Install MAUI
+      inputs:
+        targetType: 'inline'
+        script: |
+          dotnet nuget locals all --clear
+          dotnet workload install maui macos ios wasm-tools
+
+    - task: Bash@3
+      displayName: Restore nuget
+      inputs:
+        targetType: 'inline'
+        script: |
+          dotnet restore <path_to_sln>
+
+    - task: Bash@3
+      displayName: Run Unit Test
+      inputs:
+        targetType: 'inline'
+        script: |
+          dotnet test <path_to_test_csproj> --logger trx --configuration Debug --collect:"XPlat Code Coverage"
+
+    - task: PublishTestResults@2
+      condition: succeededOrFailed()
+      inputs:
+        testResultsFormat: 'VSTest'
+        testResultsFiles: |
+          **/testResults.trx
+          **/*.trx
+
+     # Publish code coverage report to the pipeline
+    - task: PublishCodeCoverageResults@1
+      condition: succeededOrFailed()
+      displayName: 'Publish code coverage'
+      inputs:
+        codeCoverageTool: Cobertura
+        summaryFileLocation: $(System.DefaultWorkingDirectory)/**/*.cobertura.xml 
+        
+    # https://docs.microsoft.com/en-us/dotnet/maui/macos/deployment/overview
+    - task: Bash@3
+      displayName: Build MacCatalyst App
+      inputs:
+        targetType: 'inline'
+        script: |
+          dotnet publish <path_to_csproj> -f net8.0-maccatalyst -c Release -p:BuildIpa=True -o ./artifacts
+
+    - task: CopyFiles@2
+      displayName: Copy MacCatalyst App
+      inputs:
+        Contents: |
+          **/**/CincoApp.MAUI/artifacts/**/*.pkg
+          CincoApp.MAUI/artifacts/**/*.pkg
+        TargetFolder: '$(Build.ArtifactStagingDirectory)'
+
+    # https://learn.microsoft.com/en-us/dotnet/maui/ios/deployment/
+    # - task: Bash@3
+    #   displayName: Build iOS App
+    #   inputs:
+    #     targetType: 'inline'
+    #     script: |
+    #       cd CincoApp.Maui/
+    #       dotnet publish <path_to_csproj> -f net7.0-ios -c Release -p:BuildIpa=False
+
+    # - task: CopyFiles@2
+    #   displayName: Copy iOS App
+    #   inputs:
+    #     Contents: |
+    #       **/*.app
+    #       **/*.ipa
+    #     TargetFolder: '$(Build.ArtifactStagingDirectory)'
+
+    # https://marketplace.visualstudio.com/items?itemName=ms-vsclient.app-store
+    # - task: AppStoreRelease@1
+    #   inputs:
+    #     releaseTrack: 'TestFlight'
+    #     appIdentifier: 'com.maui.TestApp1'
+    #     appType: 'iOS'
+    #     appSpecificId: '<ValueFromAppStoreConnect>'
+    
+  # https://docs.microsoft.com/en-us/dotnet/maui/android/deployment/overview
+    - task: Bash@3
+      displayName: Build Android App
+      inputs:
+        targetType: 'inline'
+        script: |
+          cd CincoApp.Maui/
+          dotnet publish <path_to_csproj> -f net8.0-android -c Release
+
+    # Signing Android App : https://docs.microsoft.com/en-us/azure/devops/pipelines/apps/mobile/app-signing?view=azure-devops&tabs=apple-install-during-build#sign-your-android-app
+    
+    # - task: AndroidSigning@3
+    #   inputs:
+    #     apkFiles: '**/*.apk'
+    #     apksignerKeystoreFile: '<filepath>'
+    #     apksignerKeystorePassword: '<keystorepass>'
+    #     apksignerKeystoreAlias: '<alias>'
+    #     apksignerKeyPassword: '<keypass>'
+    
+    - task: CopyFiles@2
+      inputs:
+        Contents: '<path_to_apk>'
+        TargetFolder: '$(Build.ArtifactStagingDirectory)'
+    
+    # https://marketplace.visualstudio.com/items?itemName=ms-vsclient.google-play
+
+    # - task: GooglePlayRelease@4
+    #   inputs:
+    #     applicationId: 'com.maui.TestApp1'
+    #     action: 'SingleBundle'
+    #     bundleFile: '<pathtoAAB>'
+    #     track: 'internal'
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'drop_ios_maccatalyst'
+        publishLocation: 'Container'
+
+
+
+ 
